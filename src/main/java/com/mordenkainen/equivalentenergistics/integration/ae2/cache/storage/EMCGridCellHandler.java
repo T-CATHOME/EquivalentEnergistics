@@ -17,32 +17,6 @@ import com.mordenkainen.equivalentenergistics.util.CommonUtils;
 
 public class EMCGridCellHandler {
 
-    public double calculateTotalCurrentEMC() {
-        double total = 0;
-        for (ICellProvider provider : driveBays) {
-            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
-                HandlerEMCCellBase handler = getHandler(cell);
-                if (handler != null) {
-                    total += handler.getCurrentEMC();
-                }
-            }
-        }
-        return total;
-    }
-    
-    public double calculateTotalMaxEMC() {
-        double total = 0;
-        for (ICellProvider provider : driveBays) {
-            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
-                HandlerEMCCellBase handler = getHandler(cell);
-                if (handler != null) {
-                    total += handler.getMaxEMC();
-                }
-            }
-        }
-        return total;
-    }
-    
     private final EMCStorageGrid hostGrid;
     private final List<ICellProvider> driveBays = new ArrayList<ICellProvider>();
 
@@ -102,12 +76,14 @@ public class EMCGridCellHandler {
             }
         }
 
-        hostGrid.addEMC(added);
+        // 更新网格状态
+        hostGrid.markDirty();
         return added;
     }
 
     public double extractEMC(final double emc, final Actionable mode) {
-        final double toExtract = Math.min(emc, hostGrid.getCurrentEMC());
+        // 修复递归问题：直接从存储单元提取，不再调用StorageGrid
+        final double toExtract = Math.min(emc, calculateTotalCurrentEMC());
         if (mode != Actionable.MODULATE) {
             return toExtract;
         }
@@ -125,7 +101,8 @@ public class EMCGridCellHandler {
             }
         }
 
-        hostGrid.extractEMC(extracted);
+        // 更新网格状态
+        hostGrid.markDirty();
         return extracted;
     }
 
@@ -135,6 +112,33 @@ public class EMCGridCellHandler {
         List<IMEInventoryHandler<IAEItemStack>> cells = 
             (List<IMEInventoryHandler<IAEItemStack>>) (List<?>) provider.getCellArray(StorageChannel.ITEMS);
         return cells;
+    }
+
+    // 添加公共方法供StorageGrid调用
+    public double calculateTotalCurrentEMC() {
+        double total = 0;
+        for (ICellProvider provider : driveBays) {
+            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
+                HandlerEMCCellBase handler = getHandler(cell);
+                if (handler != null) {
+                    total += handler.getCurrentEMC();
+                }
+            }
+        }
+        return total;
+    }
+    
+    public double calculateTotalMaxEMC() {
+        double total = 0;
+        for (ICellProvider provider : driveBays) {
+            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
+                HandlerEMCCellBase handler = getHandler(cell);
+                if (handler != null) {
+                    total += handler.getMaxEMC();
+                }
+            }
+        }
+        return total;
     }
 
     private HandlerEMCCellBase getHandler(final IMEInventoryHandler<IAEItemStack> cell) {
@@ -215,21 +219,11 @@ public class EMCGridCellHandler {
     }
 
     private void updatePoolState() {
-        double totalEMC = 0;
-        double maxEMC = 0;
-        
-        for (ICellProvider provider : driveBays) {
-            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
-                HandlerEMCCellBase handler = getHandler(cell);
-                if (handler != null) {
-                    totalEMC += handler.getCurrentEMC();
-                    maxEMC += handler.getMaxEMC();
-                }
-            }
-        }
+        double totalEMC = calculateTotalCurrentEMC();
+        double maxEMC = calculateTotalMaxEMC();
         
         hostGrid.setMaxEMC(maxEMC);
         hostGrid.setCurrentEMC(totalEMC);
         hostGrid.markDirty();
     }
-                                                               }
+}
