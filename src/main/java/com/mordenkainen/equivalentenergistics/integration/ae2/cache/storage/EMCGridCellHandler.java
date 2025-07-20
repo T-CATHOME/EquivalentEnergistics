@@ -1,6 +1,5 @@
 package com.mordenkainen.equivalentenergistics.integration.ae2.cache.storage;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -18,12 +17,13 @@ import com.mordenkainen.equivalentenergistics.util.CommonUtils;
 
 public class EMCGridCellHandler {
 
-    private static Field intHandler;
-    private static Field extHandler;
-
     private final EMCStorageGrid hostGrid;
-
     private final List<ICellProvider> driveBays = new ArrayList<ICellProvider>();
+
+    // 新增接口用于安全访问包装的处理器
+    public interface IWrappedEMCHandler {
+        IMEInventoryHandler<IAEItemStack> getWrappedHandler();
+    }
 
     public EMCGridCellHandler(final EMCStorageGrid hostGrid) {
         this.hostGrid = hostGrid;
@@ -31,46 +31,32 @@ public class EMCGridCellHandler {
 
     public void addNode(final IGridNode gridNode, final IGridHost machine) {
         if (machine instanceof ICellProvider) {
-            driveBays.add((ICellProvider) machine);
+            ICellProvider provider = (ICellProvider) machine;
+            driveBays.add(provider);
+            
+            // 绑定状态更新回调
+            for (IMEInventoryHandler<IAEItemStack> handler : getCellHandlers(provider)) {
+                HandlerEMCCellBase emcHandler = getHandler(handler);
+                if (emcHandler != null) {
+                    emcHandler.setChangeCallback(() -> {
+                        updatePoolState();
+                        hostGrid.markDirty();
+                    });
+                }
+            }
         }
     }
 
-    @SuppressWarnings({ "rawtypes", "unchecked" }) // NOPMD
     public void cellUpdate(final MENetworkCellArrayUpdate cellUpdate) {
-        double newEMC = 0;
-        double newMax = 0;
-        for (final ICellProvider provider : driveBays) {
-            final List<IMEInventoryHandler> cells = provider.getCellArray(StorageChannel.ITEMS);
-            for (final IMEInventoryHandler cell : cells) {
-                final HandlerEMCCellBase handler = getHandler(cell);
-                if (handler != null) {
-                    newEMC += handler.getCurrentEMC();
-                    newMax += handler.getMaxEMC();
-                }
-            }
-        }
-
-        updatePool(newMax, newEMC);
+        updatePoolState();
     }
 
-    @SuppressWarnings({ "rawtypes", "unchecked" })
     public void removeNode(final IGridNode gridNode, final IGridHost machine) {
-        if (machine instanceof ICellProvider && driveBays.remove((ICellProvider) machine)) {
-            double newEMC = hostGrid.getCurrentEMC();
-            double newMax = hostGrid.getMaxEMC();
-            final List<IMEInventoryHandler> cells = ((ICellProvider) machine).getCellArray(StorageChannel.ITEMS);
-            for (final IMEInventoryHandler cell : cells) {
-                final HandlerEMCCellBase handler = getHandler(cell);
-                if (handler != null) {
-                    newEMC -= handler.getCurrentEMC();
-                    newMax -= handler.getMaxEMC();
-                }
-            }
-            updatePool(newMax, newEMC);
+        if (machine instanceof ICellProvider && driveBays.remove(machine)) {
+            updatePoolState();
         }
     }
 
-    @SuppressWarnings({ "rawtypes", "unchecked" })
     public double injectEMC(final double emc, final Actionable mode) {
         final double toAdd = Math.min(emc, hostGrid.getAvail());
         if (mode != Actionable.MODULATE) {
@@ -79,12 +65,10 @@ public class EMCGridCellHandler {
 
         double added = 0;
         for (final ICellProvider provider : driveBays) {
-            final List<IMEInventoryHandler> cells = provider.getCellArray(StorageChannel.ITEMS);
-            for (final IMEInventoryHandler cell : cells) {
+            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
                 final HandlerEMCCellBase handler = getHandler(cell);
                 if (handler != null) {
                     added += handler.addEMC(toAdd - added);
-                    hostGrid.markDirty();
                     if (added == toAdd) {
                         break;
                     }
@@ -96,7 +80,6 @@ public class EMCGridCellHandler {
         return added;
     }
 
-    @SuppressWarnings({ "rawtypes", "unchecked" })
     public double extractEMC(final double emc, final Actionable mode) {
         final double toExtract = Math.min(emc, hostGrid.getCurrentEMC());
         if (mode != Actionable.MODULATE) {
@@ -105,12 +88,10 @@ public class EMCGridCellHandler {
 
         double extracted = 0;
         for (final ICellProvider provider : driveBays) {
-            final List<IMEInventoryHandler> cells = provider.getCellArray(StorageChannel.ITEMS);
-            for (final IMEInventoryHandler cell : cells) {
+            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
                 final HandlerEMCCellBase handler = getHandler(cell);
                 if (handler != null) {
                     extracted += handler.extractEMC(toExtract - extracted);
-                    hostGrid.markDirty();
                     if (extracted == toExtract) {
                         break;
                     }
@@ -122,60 +103,107 @@ public class EMCGridCellHandler {
         return extracted;
     }
 
-    @SuppressWarnings("unchecked")
+    private List<IMEInventoryHandler<IAEItemStack>> getCellHandlers(ICellProvider provider) {
+        // 安全类型转换
+        @SuppressWarnings("unchecked")
+        List<IMEInventoryHandler<IAEItemStack>> cells = 
+            (List<IMEInventoryHandler<IAEItemStack>>) (List<?>) provider.getCellArray(StorageChannel.ITEMS);
+        return cells;
+    }
+
     private HandlerEMCCellBase getHandler(final IMEInventoryHandler<IAEItemStack> cell) {
+        // 直接类型检查作为首选方案
         if (cell instanceof HandlerEMCCellBase) {
             return (HandlerEMCCellBase) cell;
         }
-
-        if (cell == null || intHandler == null && !reflectFields()) {
-            return null;
-        }
-
-        IMEInventoryHandler<IAEItemStack> realHandler = null;
-        try {
-            final String className = cell.getClass().getSimpleName();
-            if ("DriveWatcher".equals(className)) {
-                realHandler = (IMEInventoryHandler<IAEItemStack>) intHandler.get(cell);
-            } else if ("ChestMonitorHandler".equals(className)) {
-                final IMEInventoryHandler<IAEItemStack> monHandler = (IMEInventoryHandler<IAEItemStack>) extHandler
-                        .get(cell);
-                realHandler = (IMEInventoryHandler<IAEItemStack>) intHandler.get(monHandler);
+        
+        // 使用接口探测替代反射
+        if (cell instanceof IWrappedEMCHandler) {
+            IMEInventoryHandler<IAEItemStack> unwrapped = ((IWrappedEMCHandler) cell).getWrappedHandler();
+            if (unwrapped instanceof HandlerEMCCellBase) {
+                return (HandlerEMCCellBase) unwrapped;
             }
-        } catch (IllegalArgumentException | IllegalAccessException e) {
-            CommonUtils.debugLog("Failed to reflect into AE", e);
         }
-
-        if (realHandler instanceof HandlerEMCCellBase) {
-            return (HandlerEMCCellBase) realHandler;
+        
+        // 尝试递归解包
+        HandlerEMCCellBase handler = recursivelyUnwrap(cell, 0, 3);
+        if (handler != null) {
+            return handler;
         }
-
+        
         return null;
     }
 
-    private void updatePool(final double newMax, final double newCurrent) {
-        if (newMax != hostGrid.getMaxEMC() || newCurrent != hostGrid.getCurrentEMC()) {
-            hostGrid.setMaxEMC(newMax);
-            hostGrid.setCurrentEMC(newCurrent);
-            hostGrid.markDirty();
-        }
-    }
-
-    private static boolean reflectFields() {
+    private HandlerEMCCellBase recursivelyUnwrap(IMEInventoryHandler<IAEItemStack> handler, int depth, int maxDepth) {
+        if (depth >= maxDepth) return null;
+        
         try {
-            Class<?> clazz;
-            clazz = Class.forName("appeng.me.storage.MEInventoryHandler");
-            intHandler = clazz.getDeclaredField("internal");
-            intHandler.setAccessible(true);
-            clazz = Class.forName("appeng.api.storage.MEMonitorHandler");
-            extHandler = clazz.getDeclaredField("internalHandler");
-            extHandler.setAccessible(true);
-        } catch (ClassNotFoundException | NoSuchFieldException | SecurityException e) {
-            CommonUtils.debugLog("Failed to reflect into AE", e);
-            return false;
+            // 尝试访问常见包装字段
+            for (String fieldName : new String[]{"internal", "delegate", "wrapped"}) {
+                try {
+                    java.lang.reflect.Field field = handler.getClass().getDeclaredField(fieldName);
+                    field.setAccessible(true);
+                    Object inner = field.get(handler);
+                    
+                    if (inner instanceof IMEInventoryHandler) {
+                        @SuppressWarnings("unchecked")
+                        IMEInventoryHandler<IAEItemStack> innerHandler = (IMEInventoryHandler<IAEItemStack>) inner;
+                        
+                        if (innerHandler instanceof HandlerEMCCellBase) {
+                            return (HandlerEMCCellBase) innerHandler;
+                        }
+                        
+                        HandlerEMCCellBase result = recursivelyUnwrap(innerHandler, depth + 1, maxDepth);
+                        if (result != null) return result;
+                    }
+                } catch (NoSuchFieldException e) {
+                    // 忽略，尝试下一个字段名
+                }
+            }
+            
+            // 尝试访问AE2标准包装
+            java.lang.reflect.Field[] fields = handler.getClass().getDeclaredFields();
+            for (java.lang.reflect.Field field : fields) {
+                if (IMEInventoryHandler.class.isAssignableFrom(field.getType())) {
+                    field.setAccessible(true);
+                    Object inner = field.get(handler);
+                    
+                    if (inner instanceof IMEInventoryHandler) {
+                        @SuppressWarnings("unchecked")
+                        IMEInventoryHandler<IAEItemStack> innerHandler = (IMEInventoryHandler<IAEItemStack>) inner;
+                        
+                        if (innerHandler instanceof HandlerEMCCellBase) {
+                            return (HandlerEMCCellBase) innerHandler;
+                        }
+                        
+                        HandlerEMCCellBase result = recursivelyUnwrap(innerHandler, depth + 1, maxDepth);
+                        if (result != null) return result;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            CommonUtils.debugLog("Error while unwrapping handler", e);
         }
-
-        return true;
+        
+        return null;
     }
 
-}
+    private void updatePoolState() {
+        double totalEMC = 0;
+        double maxEMC = 0;
+        
+        for (ICellProvider provider : driveBays) {
+            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
+                HandlerEMCCellBase handler = getHandler(cell);
+                if (handler != null) {
+                    totalEMC += handler.getCurrentEMC();
+                    maxEMC += handler.getMaxEMC();
+                }
+            }
+        }
+        
+        hostGrid.setMaxEMC(maxEMC);
+        hostGrid.setCurrentEMC(totalEMC);
+        hostGrid.markDirty();
+    }
+                                                               }
