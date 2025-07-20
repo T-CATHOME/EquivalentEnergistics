@@ -49,12 +49,9 @@ public class EMCStorageGrid implements IEMCStorageGrid {
     }
 
     private void updateCellEMC() {
-        double totalEMC = 0;
-        double totalMaxEMC = 0;
-        
-        // 假设 cellHandler 有方法获取所有存储单元的EMC
-        totalEMC = cellHandler.getTotalCurrentEMC();
-        totalMaxEMC = cellHandler.getTotalMaxEMC();
+        // 直接调用cellHandler的公共方法来获取总EMC
+        double totalEMC = cellHandler.calculateTotalCurrentEMC();
+        double totalMaxEMC = cellHandler.calculateTotalMaxEMC();
         
         // 只有当值变化时才更新
         if (totalEMC != lastCellEMC || totalMaxEMC != lastCellMaxEMC) {
