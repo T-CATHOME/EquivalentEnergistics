@@ -1,6 +1,5 @@
 package com.mordenkainen.equivalentenergistics.integration.ae2.cache.storage;
 
-
 import appeng.api.config.Actionable;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridHost;
@@ -135,6 +134,7 @@ public class EMCStorageGrid implements IEMCStorageGrid {
 
     @Override
     public double extractEMC(final double emc, final Actionable mode) {
+        // 修复递归问题：直接调用cellHandler，避免循环调用
         return cellHandler.extractEMC(emc, mode);
     }
     
