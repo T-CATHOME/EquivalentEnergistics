@@ -50,7 +50,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: application-jar
-        path: ${{ steps.gradle-build.outputs.jar_path }}
+        path: ./*
         retention-days: 7
     
     # NOTE: The Gradle Wrapper is the default and recommended way to run Gradle (https://docs.gradle.org/current/userguide/gradle_wrapper.html).
