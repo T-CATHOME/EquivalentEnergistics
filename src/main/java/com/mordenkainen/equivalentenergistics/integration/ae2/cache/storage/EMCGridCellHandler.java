@@ -17,6 +17,32 @@ import com.mordenkainen.equivalentenergistics.util.CommonUtils;
 
 public class EMCGridCellHandler {
 
+    public double calculateTotalCurrentEMC() {
+        double total = 0;
+        for (ICellProvider provider : driveBays) {
+            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
+                HandlerEMCCellBase handler = getHandler(cell);
+                if (handler != null) {
+                    total += handler.getCurrentEMC();
+                }
+            }
+        }
+        return total;
+    }
+    
+    public double calculateTotalMaxEMC() {
+        double total = 0;
+        for (ICellProvider provider : driveBays) {
+            for (IMEInventoryHandler<IAEItemStack> cell : getCellHandlers(provider)) {
+                HandlerEMCCellBase handler = getHandler(cell);
+                if (handler != null) {
+                    total += handler.getMaxEMC();
+                }
+            }
+        }
+        return total;
+    }
+    
     private final EMCStorageGrid hostGrid;
     private final List<ICellProvider> driveBays = new ArrayList<ICellProvider>();
 
