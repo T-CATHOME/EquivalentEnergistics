@@ -39,22 +39,50 @@ jobs:
     - name: Fix Form
       run: ./gradlew :spotlessApply
       
-    - name: Build with Gradle Wrapper
-      run: ./gradlew build
-
-    - name: Find JAR file
-      id: find-jar
+    - name: Build with Gradle
+      id: gradle-build
       run: |
-        JAR_PATH=$(find . -path "*/build/libs/*.jar" ! -name "*-plain.jar" | head -n 1)
+        # 执行构建并捕获输出
+        ./gradlew build --console=plain > build.log 2>&1
+        # 从日志中提取主JAR路径
+        JAR_PATH=$(grep -oP 'Building jar: \K.*?(?=\s)' build.log || true)
+        
+        # 如果未找到，使用备用方法查找
+        if [ -z "$JAR_PATH" ]; then
+          echo "Using fallback JAR detection"
+          JAR_PATH=$(find . -path "*/build/libs/*.jar" ! -name "*-*" ! -name "*plain*" | head -n 1)
+        fi
+        
+        # 验证文件存在
+        if [ ! -f "$JAR_PATH" ]; then
+          echo "::error::JAR file not found: $JAR_PATH"
+          exit 1
+        fi
+        
         echo "jar_path=$JAR_PATH" >> $GITHUB_OUTPUT
-        echo "JAR located at: $JAR_PATH"
+        echo "Detected JAR: $JAR_PATH"
+
+    - name: Verify JAR file
+      run: |
+        echo "Verifying JAR: ${{ steps.gradle-build.outputs.jar_path }}"
+        # 检查是否是有效的JAR文件
+        if ! jar -tf "${{ steps.gradle-build.outputs.jar_path }}" > /dev/null; then
+          echo "::error::Invalid JAR file"
+          exit 1
+        fi
+        # 检查文件大小
+        FILESIZE=$(stat -c%s "${{ steps.gradle-build.outputs.jar_path }}")
+        if [ "$FILESIZE" -lt 10000 ]; then
+          echo "::error::JAR file too small, likely incomplete"
+          exit 1
+        fi
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: application-jar
-        path: ${{ steps.find-jar.outputs.jar_path }}
-
+        path: ${{ steps.gradle-build.outputs.jar_path }}
+        retention-days: 7
     
     # NOTE: The Gradle Wrapper is the default and recommended way to run Gradle (https://docs.gradle.org/current/userguide/gradle_wrapper.html).
     # If your project does not have the Gradle Wrapper configured, you can use the following configuration to run Gradle with a specified version.
