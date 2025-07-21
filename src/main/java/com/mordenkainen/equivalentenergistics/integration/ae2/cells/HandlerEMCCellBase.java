@@ -8,16 +8,12 @@ import appeng.api.storage.ISaveProvider;
 import appeng.api.storage.StorageChannel;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IItemList;
-
-import com.mordenkainen.equivalentenergistics.integration.ae2.cache.storage.EMCGridCellHandler;
 import com.mordenkainen.equivalentenergistics.util.IEMCStorage;
+import net.minecraft.nbt.NBTTagCompound;
 
-public abstract class HandlerEMCCellBase implements IMEInventoryHandler<IAEItemStack>, IEMCStorage, 
-                                                  EMCGridCellHandler.IWrappedEMCHandler {
+public abstract class HandlerEMCCellBase implements IMEInventoryHandler<IAEItemStack>, IEMCStorage {
 
     protected final ISaveProvider saveProvider;
-    private Runnable changeCallback;
-    private int lastStatus = -1;
     protected double currentEMC = 0;
     protected double maxEMC = 0;
 
@@ -76,92 +72,71 @@ public abstract class HandlerEMCCellBase implements IMEInventoryHandler<IAEItemS
     }
 
     public abstract int getCellStatus();
-    
-    // ========== IEMCStorage 接口实现 ==========
-    
+
     @Override
     public double getCurrentEMC() {
         return currentEMC;
     }
-    
+
     @Override
     public double getMaxEMC() {
         return maxEMC;
     }
-    
+
     @Override
     public double getAvail() {
         return maxEMC - currentEMC;
     }
-    
+
     @Override
     public double addEMC(double amount) {
         double toAdd = Math.min(amount, getAvail());
         currentEMC += toAdd;
         if (toAdd > 0) {
-            notifyStateChanged();
+            saveState();
         }
         return toAdd;
     }
-    
+
     @Override
     public double extractEMC(double amount) {
         double toExtract = Math.min(amount, currentEMC);
         currentEMC -= toExtract;
         if (toExtract > 0) {
-            notifyStateChanged();
+            saveState();
         }
         return toExtract;
     }
-    
+
     public void setEMC(double emc) {
         double oldEMC = currentEMC;
         currentEMC = Math.min(Math.max(emc, 0), maxEMC);
         if (currentEMC != oldEMC) {
-            notifyStateChanged();
+            saveState();
         }
     }
-    
-    // ========== EMC 状态回调机制 ==========
-    
-    /**
-     * 设置状态变更回调函数
-     * @param callback 状态变化时触发的回调
-     */
-    public void setChangeCallback(Runnable callback) {
-        this.changeCallback = callback;
+
+    // -- EMC NBT持久化 --
+    private static final String NBT_CURRENT_EMC = "EE_CurrentEMC";
+    private static final String NBT_MAX_EMC = "EE_MaxEMC";
+
+    public void writeToNBT(NBTTagCompound nbt) {
+        nbt.setDouble(NBT_CURRENT_EMC, currentEMC);
+        nbt.setDouble(NBT_MAX_EMC, maxEMC);
     }
-    
-    /**
-     * 触发状态变更回调
-     */
-    protected void notifyStateChanged() {
-        if (changeCallback != null) {
-            changeCallback.run();
+
+    public void readFromNBT(NBTTagCompound nbt) {
+        if (nbt.hasKey(NBT_CURRENT_EMC)) {
+            currentEMC = nbt.getDouble(NBT_CURRENT_EMC);
         }
-        
-        // 检测单元状态变化（用于驱动器状态显示）
-        int currentStatus = getCellStatus();
-        if (currentStatus != lastStatus) {
-            lastStatus = currentStatus;
-            requestClientUpdate();
+        if (nbt.hasKey(NBT_MAX_EMC)) {
+            maxEMC = nbt.getDouble(NBT_MAX_EMC);
         }
     }
-    
-    /**
-     * 请求客户端更新（模拟原blinkCell功能）
-     */
-    protected void requestClientUpdate() {
-        // 默认实现，子类可以覆盖
+
+    protected void saveState() {
         if (saveProvider != null) {
             saveProvider.saveChanges(this);
         }
-    }
-    
-    // ========== IWrappedEMCHandler 接口实现 ==========
-    
-    @Override
-    public IMEInventoryHandler<IAEItemStack> getWrappedHandler() {
-        return this;
     }
 }
