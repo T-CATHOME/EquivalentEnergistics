@@ -28,12 +28,11 @@ public class EMCGridCellHandler {
             if (!driveBays.contains(provider)) {
                 driveBays.add(provider);
             }
-            // 已移除 setChangeCallback 相关代码
         }
     }
 
     public void cellUpdate(final MENetworkCellArrayUpdate cellUpdate) {
-        // 由 EMCStorageGrid 调用 updateCellEMC 统一处理
+        // 由 EMCStorageGrid 调用更新
     }
 
     public void removeNode(final IGridNode gridNode, final IGridHost machine) {
