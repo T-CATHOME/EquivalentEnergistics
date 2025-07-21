@@ -45,7 +45,6 @@ public class EMCStorageGrid implements IEMCStorageGrid {
             cellHandler.updatePoolState(); // 主动刷新池和终端显示
             needInitialRefresh = false;
         }
-
         // 只在需要时更新
         if (needsCellUpdate) {
             updateCellEMC();
