@@ -8,7 +8,6 @@ import appeng.api.networking.events.MENetworkCellArrayUpdate;
 import appeng.api.networking.events.MENetworkEventSubscribe;
 import appeng.api.networking.events.MENetworkPostCacheConstruction;
 import appeng.api.networking.storage.IStorageGrid;
-
 import com.mordenkainen.equivalentenergistics.util.EMCPool;
 
 public class EMCStorageGrid implements IEMCStorageGrid {
@@ -18,7 +17,8 @@ public class EMCStorageGrid implements IEMCStorageGrid {
     private final EMCGridCellHandler cellHandler = new EMCGridCellHandler(this);
     private final EMCGridCrystalHandler crystalHandler = new EMCGridCrystalHandler(this);
 
-    // 添加状态标记，用于优化更新
+    // 防止重启或节点变化导致EMC丢失
+    private boolean initialized = false;
     private boolean needsCellUpdate = true;
     private double lastCellEMC = -1;
     private double lastCellMaxEMC = -1;
@@ -34,13 +34,15 @@ public class EMCStorageGrid implements IEMCStorageGrid {
 
     @MENetworkEventSubscribe
     public void cellUpdate(final MENetworkCellArrayUpdate cellUpdate) {
-        // 标记需要更新，而不是立即计算
         needsCellUpdate = true;
     }
 
     @Override
     public void onUpdateTick() {
-        // 只在需要时更新
+        if (!initialized) {
+            initializeGrid();
+            initialized = true;
+        }
         if (needsCellUpdate) {
             updateCellEMC();
             needsCellUpdate = false;
@@ -48,12 +50,20 @@ public class EMCStorageGrid implements IEMCStorageGrid {
         crystalHandler.updateDisplay();
     }
 
+    private void initializeGrid() {
+        // 重新扫描所有节点
+        for (IGridNode node : grid.getNodes()) {
+            IGridHost host = node.getGridBlock().getMachine();
+            if (host != null) {
+                cellHandler.addNode(node, host);
+            }
+        }
+        updateCellEMC();
+    }
+
     private void updateCellEMC() {
-        // 直接调用cellHandler的公共方法来获取总EMC
         double totalEMC = cellHandler.calculateTotalCurrentEMC();
         double totalMaxEMC = cellHandler.calculateTotalMaxEMC();
-        
-        // 只有当值变化时才更新
         if (totalEMC != lastCellEMC || totalMaxEMC != lastCellMaxEMC) {
             pool.setCurrentEMC(totalEMC);
             pool.setMaxEMC(totalMaxEMC);
@@ -65,13 +75,15 @@ public class EMCStorageGrid implements IEMCStorageGrid {
     @Override
     public void removeNode(final IGridNode gridNode, final IGridHost machine) {
         cellHandler.removeNode(gridNode, machine);
-        needsCellUpdate = true; // 标记需要更新
+        needsCellUpdate = true;
+        initialized = false;
     }
 
     @Override
     public void addNode(final IGridNode gridNode, final IGridHost machine) {
         cellHandler.addNode(gridNode, machine);
-        needsCellUpdate = true; // 标记需要更新
+        needsCellUpdate = true;
+        initialized = false;
     }
 
     @Override
@@ -81,13 +93,11 @@ public class EMCStorageGrid implements IEMCStorageGrid {
 
     @Override
     public double getCurrentEMC() {
-        // 优先返回缓存值
         return lastCellEMC >= 0 ? lastCellEMC : pool.getCurrentEMC();
     }
 
     @Override
     public double getMaxEMC() {
-        // 优先返回缓存值
         return lastCellMaxEMC >= 0 ? lastCellMaxEMC : pool.getMaxEMC();
     }
 
@@ -108,7 +118,6 @@ public class EMCStorageGrid implements IEMCStorageGrid {
 
     @Override
     public void setCurrentEMC(final double currentEMC) {
-        // 不再直接设置，通过cellHandler分配
         distributeEMC(currentEMC - getCurrentEMC(), Actionable.MODULATE);
     }
 
@@ -134,11 +143,9 @@ public class EMCStorageGrid implements IEMCStorageGrid {
 
     @Override
     public double extractEMC(final double emc, final Actionable mode) {
-        // 修复递归问题：直接调用cellHandler，避免循环调用
         return cellHandler.extractEMC(emc, mode);
     }
-    
-    // 新增EMC分配方法
+
     private double distributeEMC(double amount, Actionable mode) {
         if (amount > 0) {
             return addEMC(amount, mode);
