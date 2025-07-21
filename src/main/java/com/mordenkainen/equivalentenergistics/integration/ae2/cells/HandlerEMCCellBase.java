@@ -10,6 +10,10 @@ import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IItemList;
 import com.mordenkainen.equivalentenergistics.util.IEMCStorage;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.tileentity.TileEntity;
+import appeng.api.networking.IGridHost;
+import appeng.api.networking.IGridNode;
+import appeng.api.networking.events.MENetworkCellArrayUpdate;
 
 public abstract class HandlerEMCCellBase implements IMEInventoryHandler<IAEItemStack>, IEMCStorage {
 
@@ -91,9 +95,9 @@ public abstract class HandlerEMCCellBase implements IMEInventoryHandler<IAEItemS
     @Override
     public double addEMC(double amount) {
         double toAdd = Math.min(amount, getAvail());
-        currentEMC += toAdd;
         if (toAdd > 0) {
-            saveState();
+            currentEMC += toAdd;
+            onEMCChanged();
         }
         return toAdd;
     }
@@ -101,18 +105,18 @@ public abstract class HandlerEMCCellBase implements IMEInventoryHandler<IAEItemS
     @Override
     public double extractEMC(double amount) {
         double toExtract = Math.min(amount, currentEMC);
-        currentEMC -= toExtract;
         if (toExtract > 0) {
-            saveState();
+            currentEMC -= toExtract;
+            onEMCChanged();
         }
         return toExtract;
     }
 
     public void setEMC(double emc) {
-        double oldEMC = currentEMC;
-        currentEMC = Math.min(Math.max(emc, 0), maxEMC);
-        if (currentEMC != oldEMC) {
-            saveState();
+        double clamped = Math.min(Math.max(emc, 0), maxEMC);
+        if (clamped != currentEMC) {
+            currentEMC = clamped;
+            onEMCChanged();
         }
     }
 
@@ -134,9 +138,20 @@ public abstract class HandlerEMCCellBase implements IMEInventoryHandler<IAEItemS
         }
     }
 
-    protected void saveState() {
+    // 每次EMC变化后，触发AE2网络刷新事件
+    protected void onEMCChanged() {
         if (saveProvider != null) {
             saveProvider.saveChanges(this);
+        }
+        // 通知AE2网络刷新内容
+        if (saveProvider instanceof TileEntity) {
+            TileEntity te = (TileEntity) saveProvider;
+            if (te instanceof IGridHost) {
+                IGridNode node = ((IGridHost) te).getGridNode(null);
+                if (node != null && node.getGrid() != null) {
+                    node.getGrid().postEvent(new MENetworkCellArrayUpdate());
+                }
+            }
         }
     }
 }
