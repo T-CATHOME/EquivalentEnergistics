@@ -15,7 +15,8 @@ import appeng.api.storage.data.IAEItemStack;
 import com.mordenkainen.equivalentenergistics.integration.ae2.cells.HandlerEMCCellBase;
 import com.mordenkainen.equivalentenergistics.util.CommonUtils;
 
-public class EMCGridCellHandler {
+public class EMCGridCellHandle
+    r {
 
     private final EMCStorageGrid hostGrid;
     private final List<ICellProvider> driveBays = new ArrayList<ICellProvider>();
@@ -218,7 +219,7 @@ public class EMCGridCellHandler {
         return null;
     }
 
-    private void updatePoolState() {
+     public void updatePoolState() {
         double totalEMC = calculateTotalCurrentEMC();
         double maxEMC = calculateTotalMaxEMC();
         
