@@ -13,15 +13,12 @@ import com.mordenkainen.equivalentenergistics.util.EMCPool;
 public class EMCStorageGrid implements IEMCStorageGrid {
 
     private final IGrid grid;
-    private final EMCPool pool = new EMCPool();
     private final EMCGridCellHandler cellHandler = new EMCGridCellHandler(this);
     private final EMCGridCrystalHandler crystalHandler = new EMCGridCrystalHandler(this);
 
-    // 防止重启或节点变化导致EMC丢失
+    // 用于强制重新扫描节点
     private boolean initialized = false;
     private boolean needsCellUpdate = true;
-    private double lastCellEMC = -1;
-    private double lastCellMaxEMC = -1;
 
     public EMCStorageGrid(final IGrid grid) {
         this.grid = grid;
@@ -44,31 +41,18 @@ public class EMCStorageGrid implements IEMCStorageGrid {
             initialized = true;
         }
         if (needsCellUpdate) {
-            updateCellEMC();
             needsCellUpdate = false;
+            // 主动刷新终端显示
+            crystalHandler.updateDisplay();
         }
-        crystalHandler.updateDisplay();
     }
 
     private void initializeGrid() {
-        // 重新扫描所有节点
         for (IGridNode node : grid.getNodes()) {
             IGridHost host = node.getGridBlock().getMachine();
             if (host != null) {
                 cellHandler.addNode(node, host);
             }
-        }
-        updateCellEMC();
-    }
-
-    private void updateCellEMC() {
-        double totalEMC = cellHandler.calculateTotalCurrentEMC();
-        double totalMaxEMC = cellHandler.calculateTotalMaxEMC();
-        if (totalEMC != lastCellEMC || totalMaxEMC != lastCellMaxEMC) {
-            pool.setCurrentEMC(totalEMC);
-            pool.setMaxEMC(totalMaxEMC);
-            lastCellEMC = totalEMC;
-            lastCellMaxEMC = totalMaxEMC;
         }
     }
 
@@ -93,12 +77,12 @@ public class EMCStorageGrid implements IEMCStorageGrid {
 
     @Override
     public double getCurrentEMC() {
-        return lastCellEMC >= 0 ? lastCellEMC : pool.getCurrentEMC();
+        return cellHandler.calculateTotalCurrentEMC();
     }
 
     @Override
     public double getMaxEMC() {
-        return lastCellMaxEMC >= 0 ? lastCellMaxEMC : pool.getMaxEMC();
+        return cellHandler.calculateTotalMaxEMC();
     }
 
     @Override
@@ -118,12 +102,14 @@ public class EMCStorageGrid implements IEMCStorageGrid {
 
     @Override
     public void setCurrentEMC(final double currentEMC) {
-        distributeEMC(currentEMC - getCurrentEMC(), Actionable.MODULATE);
+        // 不直接设置，由单元分配
+        double diff = currentEMC - getCurrentEMC();
+        distributeEMC(diff, Actionable.MODULATE);
     }
 
     @Override
     public void setMaxEMC(final double maxEMC) {
-        // 最大EMC由存储单元决定，不直接设置
+        // 最大EMC由所有单元决定
     }
 
     @Override
