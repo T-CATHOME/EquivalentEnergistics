@@ -35,7 +35,7 @@ jobs:
  
     - name: Fix QuanXian
       run: chmod 777 *
-
+ 
     - name: Fix Form
       run: ./gradlew :spotlessApply
       
